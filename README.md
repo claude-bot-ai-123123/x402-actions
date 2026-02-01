@@ -1,168 +1,122 @@
 # x402-actions
 
-Actions-compliant API for Solana DeFi transactions with gasless support via [Kora](https://github.com/kora-labs/kora).
+**Permissionless Solana DeFi API** — No API keys, just pay per request.
 
-Build swap, stake, and lend transactions via a simple HTTP interface. Users can pay gas fees in USDC instead of SOL.
+Built on [x402](https://x402.org) payment protocol + Solana Actions standard + [Kora](https://github.com/kora-labs/kora) gasless transactions.
 
-**Swap Backend:** Raydium Actions (blinks) — no SDK dependencies, pure HTTP calls to Actions-compliant endpoints.
+## How It Works
 
-## Features
+```
+Agent: POST /gasless/build (swap SOL→USDC)
+   ↓
+Server: 402 Payment Required
+        Pay $0.01 USDC to execute
+   ↓  
+Agent: Signs USDC payment, retries with Payment-Signature header
+   ↓
+Server: ✓ Payment verified → Returns signed swap transaction
+```
 
-- **Actions-compliant** - Works with Solana Blinks and Actions standard
-- **Gasless transactions** - Users pay fees in USDC via Kora fee payer
-- **Simple API** - HTTP endpoints return serialized transactions ready to sign
+**No accounts. No API keys. Just a wallet.**
 
 ## Quick Start
 
+### As a Client (AI Agent)
+
+```typescript
+import { createSvmClient } from "@x402/svm/client";
+import { wrapFetchWithPayment } from "@x402/fetch";
+import { Keypair } from "@solana/web3.js";
+
+// Your agent's wallet
+const keypair = Keypair.fromSecretKey(/* your key */);
+const client = createSvmClient({ signer: toClientSvmSigner(keypair) });
+
+// Wrap fetch to auto-pay x402 requests
+const paidFetch = wrapFetchWithPayment(fetch, client);
+
+// Now just use it — payment happens automatically
+const response = await paidFetch("https://api.example.com/gasless/build", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    inputMint: "So11111111111111111111111111111111111111112",
+    outputMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    amount: "0.1",
+    userWallet: keypair.publicKey.toBase58(),
+  }),
+});
+
+const { transaction } = await response.json();
+// Sign and submit transaction...
+```
+
+### As a Server
+
 ```bash
-# Install dependencies
+# Install
+git clone https://github.com/your-repo/x402-actions
+cd x402-actions
 npm install
 
-# Configure environment
+# Configure
 cp .env.example .env
-# Edit .env with your RPC URL and Kora private key
+# Edit .env:
+#   X402_ENABLED=true
+#   X402_PAY_TO=YourSolanaAddress (receives payments)
+#   SOLANA_RPC_URL=https://your-rpc.com
 
-# Development (API only)
-npm run dev
-
-# Production
+# Run
 npm run build
 npm start
 ```
 
-## Environment Variables
+## Pricing
 
-Create a `.env` file:
+| Endpoint | Price | Description |
+|----------|-------|-------------|
+| `POST /actions/swap` | $0.001 | Build swap transaction |
+| `POST /gasless/quote` | $0.005 | Get swap quote with gas estimate |
+| `POST /gasless/build` | $0.01 | Build gasless transaction |
+| `POST /gasless/execute` | $0.02 | Execute via Kora (includes gas) |
 
-```env
-# Server port
-PORT=3000
+All payments in **USDC on Solana mainnet**.
 
-# Solana RPC URL (use a reliable RPC for production)
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+## API Reference
 
-# Kora fee payer private key (base58 encoded)
-# This wallet pays gas fees and gets reimbursed in USDC
-KORA_PRIVATE_KEY=your_base58_private_key_here
-
-# Optional: Kora RPC URL (default: http://localhost:8181)
-KORA_RPC_URL=http://localhost:8181
-```
-
-## Gasless Setup with Kora
-
-For gasless transactions, you need to run Kora alongside this API.
-
-### 1. Install Kora CLI
-
-```bash
-cargo install kora-cli
-```
-
-### 2. Configure Kora
-
-The included `kora.toml` configures:
-- Allowed programs (Raydium AMM, Token programs)
-- Allowed tokens for fee payment (USDC)
-- Fee payer security policies
-- Rate limiting
-
-The `signers.toml` configures the fee payer wallet (reads from `KORA_PRIVATE_KEY` env var).
-
-### 3. Fund the Fee Payer
-
-Your fee payer wallet needs SOL to pay transaction fees:
-
-```bash
-# Check the fee payer address
-kora rpc get-payer-signer --signers-config signers.toml
-
-# Send SOL to the fee payer address
-# Recommend: 0.1+ SOL for testing
-```
-
-### 4. Start Kora
-
-```bash
-# Load private key from env and start Kora RPC
-export KORA_PRIVATE_KEY="your_base58_private_key"
-kora rpc start \
-  --config kora.toml \
-  --signers-config signers.toml \
-  --port 8181
-```
-
-### 5. Start the API
-
-In a separate terminal:
-
-```bash
-npm run dev
-```
-
-## API Endpoints
-
-### Health Check
+### Free Endpoints
 
 ```
-GET /
+GET /                 → Service info
+GET /actions.json     → Blink discovery manifest  
+GET /actions/swap     → Swap action metadata
+GET /gasless/status   → Gasless service availability
 ```
 
-Returns service info and available endpoints.
+### Paid Endpoints
 
-### Actions Discovery
-
-```
-GET /actions.json
-```
-
-Returns the actions.json manifest for blink discovery.
-
-### Swap Action (Standard)
-
-**Get Metadata:**
-```
-GET /actions/swap
-```
-
-**Build Transaction:**
+#### Build Swap Transaction
 ```bash
 POST /actions/swap?inputMint=SOL&outputMint=USDC&amount=1
 Content-Type: application/json
 
-{"account": "YourWalletPublicKey..."}
+{"account": "YourWalletPublicKey"}
 ```
 
-### Gasless Endpoints
-
-**Check Service Status:**
-```
-GET /gasless/status
-```
-
-Returns:
-```json
-{
-  "available": true,
-  "feePayer": "5kFKR7n897KdGDwQwmHSncScuvZnkeQjk2wGbSjGXYjK",
-  "supportedTokens": ["EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"]
-}
-```
-
-**Get Quote with Gas Fee:**
+#### Get Gasless Quote
 ```bash
 POST /gasless/quote
 Content-Type: application/json
 
 {
   "inputMint": "So11111111111111111111111111111111111111112",
-  "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 
   "amount": "0.1",
-  "userWallet": "YourWalletPublicKey..."
+  "userWallet": "YourWalletPublicKey"
 }
 ```
 
-**Build Transaction for Signing:**
+#### Build Gasless Transaction
 ```bash
 POST /gasless/build
 Content-Type: application/json
@@ -170,84 +124,121 @@ Content-Type: application/json
 {
   "inputMint": "So11111111111111111111111111111111111111112",
   "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  "amount": "0.1",
-  "userWallet": "YourWalletPublicKey..."
+  "amount": "0.1", 
+  "userWallet": "YourWalletPublicKey"
 }
 ```
 
-**Execute Signed Transaction:**
+#### Execute Gasless Transaction
 ```bash
 POST /gasless/execute
 Content-Type: application/json
 
 {
-  "signedTransaction": "base64-encoded-signed-transaction..."
+  "signedTransaction": "base64-encoded-signed-transaction"
 }
 ```
 
-## Supported Tokens
+## x402 Payment Flow
 
-| Symbol | Mint Address |
-|--------|--------------|
-| SOL | So11111111111111111111111111111111111111112 |
-| USDC | EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v |
-| USDT | Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB |
-| RAY | 4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R |
-| JUP | JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN |
-
-## Architecture
+When you hit a paid endpoint without payment:
 
 ```
-x402-actions/
-├── src/
-│   ├── index.ts              # Express server + endpoints
-│   ├── config.ts             # Environment config + token registry
-│   ├── actions/
-│   │   ├── swap.ts           # Standard swap action
-│   │   └── gasless-swap.ts   # Gasless swap via Kora
-│   └── lib/
-│       ├── raydium.ts        # Raydium SDK integration
-│       └── kora.ts           # Kora client wrapper
-├── kora.toml                 # Kora RPC configuration
-├── signers.toml              # Kora signer configuration
-└── test-swap.ts              # Test script
+HTTP/1.1 402 Payment Required
+X-Payment-Required: eyJ...base64-encoded-payment-requirements...
 ```
 
-## Testing
+The `X-Payment-Required` header contains:
+- `price`: Amount to pay (e.g., "$0.01")
+- `payTo`: Destination wallet
+- `network`: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+- `scheme`: "exact"
+
+Your client signs a USDC transfer and retries with:
+```
+Payment-Signature: eyJ...base64-encoded-signed-payment...
+```
+
+Server verifies payment, executes request, settles on-chain.
+
+## Gasless Architecture
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   Agent     │────▶│ x402-actions │────▶│    Kora     │
+│  (wallet)   │     │   (server)   │     │ (fee payer) │
+└─────────────┘     └──────────────┘     └─────────────┘
+       │                   │                    │
+       │  1. Pay x402      │                    │
+       │─────────────────▶│                    │
+       │                   │  2. Build tx      │
+       │  3. Return tx    │◀───────────────────│
+       │◀─────────────────│                    │
+       │                   │                    │
+       │  4. Sign & send   │                    │
+       │─────────────────▶│  5. Submit + pay  │
+       │                   │───────────────────▶│
+       │  6. Confirmed    │                    │
+       │◀─────────────────│◀───────────────────│
+```
+
+Users pay API fees in USDC (via x402). Kora pays Solana gas fees.
+
+## Environment Variables
+
+```env
+# Server
+PORT=3000
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+
+# x402 Payment Gating
+X402_ENABLED=true
+X402_PAY_TO=YourSolanaWalletAddress
+X402_FACILITATOR_URL=https://facilitator.x402.org
+
+# Kora (for gasless)
+KORA_PRIVATE_KEY=base58_encoded_private_key
+KORA_RPC_URL=http://localhost:8181
+```
+
+## Running Kora (for gasless)
 
 ```bash
-# Test standard swap (requires funded wallet)
-export SOLANA_PRIVATE_KEY="your_test_wallet_key"
-npx tsx test-swap.ts
+# Install
+cargo install kora-cli
 
-# Test gasless swap (requires Kora running)
-npx tsx test-swap-inline.ts
-```
+# Fund fee payer (needs SOL for gas)
+solana transfer <fee_payer_address> 0.5
 
-## Troubleshooting
-
-### "Account not found" error
-The fee payer wallet needs SOL. Fund it first:
-```bash
-solana transfer <fee_payer_address> 0.1 --allow-unfunded-recipient
-```
-
-### Kora connection refused
-Make sure Kora is running on the expected port:
-```bash
+# Start Kora RPC
+export KORA_PRIVATE_KEY="your_base58_key"
 kora rpc start --config kora.toml --signers-config signers.toml --port 8181
 ```
 
-### Transaction validation failed
-Check `kora.toml` - the program being called might not be in `allowed_programs`.
+## Why x402?
 
-## Roadmap
+Traditional API monetization:
+1. Create account
+2. Get API key
+3. Manage credentials
+4. Rate limits, quotas, billing...
 
-- [x] Swap (Raydium)
-- [x] Gasless via Kora
-- [ ] Stake (Marinade, Sanctum)
-- [ ] Lend/Borrow (Kamino)
-- [ ] LP Deposit/Withdraw
+x402:
+1. Have wallet
+2. Pay per request
+3. That's it
+
+**For AI agents:** No credential management. No OAuth. No accounts. Just load wallet, pay, use.
+
+## Client Libraries
+
+```bash
+# Full Solana client with auto-payment
+npm install @x402/svm @x402/fetch
+
+# Or use with existing HTTP client
+npm install @x402/core @x402/svm
+```
 
 ## License
 
