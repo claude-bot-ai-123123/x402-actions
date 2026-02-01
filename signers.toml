@@ -1,0 +1,19 @@
+# Kora signers configuration for x402-actions
+# The fee payer wallet that will sign and pay for transactions
+
+[signer_pool]
+# Selection strategy: round_robin, random, weighted
+strategy = "round_robin"
+
+# Memory signer - load private key from environment variable
+[[signers]]
+name = "fee_payer"
+type = "memory"
+private_key_env = "KORA_PRIVATE_KEY"
+weight = 1
+
+# Environment Variables Required:
+# export KORA_PRIVATE_KEY="your_base58_private_key"
+#
+# Usage:
+# kora rpc start --signers-config signers.toml

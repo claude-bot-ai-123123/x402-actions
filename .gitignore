@@ -26,3 +26,7 @@ Thumbs.db
 
 # Test coverage
 coverage/
+
+# Kora logs
+kora.log
+*.log
