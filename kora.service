@@ -1,0 +1,16 @@
+[Unit]
+Description=Kora Gasless RPC Server
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/projects/x402-actions
+EnvironmentFile=/home/ec2-user/projects/x402-actions/.env.production
+Environment=PATH=/home/ec2-user/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ec2-user/.cargo/bin/kora rpc start --signers-config signers.toml --port 8181
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

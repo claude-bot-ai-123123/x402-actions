@@ -1,0 +1,19 @@
+[Unit]
+Description=x402-actions API Server
+After=network.target kora.service
+Wants=kora.service
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/projects/x402-actions
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=KORA_RPC_URL=http://localhost:8181
+Environment=SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
