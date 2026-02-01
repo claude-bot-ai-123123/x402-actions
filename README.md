@@ -4,6 +4,8 @@ Actions-compliant API for Solana DeFi transactions with gasless support via [Kor
 
 Build swap, stake, and lend transactions via a simple HTTP interface. Users can pay gas fees in USDC instead of SOL.
 
+**Swap Backend:** Raydium Actions (blinks) — no SDK dependencies, pure HTTP calls to Actions-compliant endpoints.
+
 ## Features
 
 - **Actions-compliant** - Works with Solana Blinks and Actions standard

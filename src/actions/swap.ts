@@ -4,7 +4,7 @@ import {
   ActionPostRequest,
   ActionPostResponse,
 } from '@solana/actions';
-import { buildSwapTransaction } from '../lib/raydium.js';
+import { buildSwapTransaction } from '../lib/blinks.js';
 import { config } from '../config.js';
 
 export const swapRouter = Router();
@@ -13,9 +13,9 @@ export const swapRouter = Router();
 swapRouter.get('/', (req: Request, res: Response) => {
   const response: ActionGetResponse = {
     type: 'action',
-    icon: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+    icon: 'https://img-v1.raydium.io/icon/4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R.png',
     title: 'Swap Tokens',
-    description: 'Swap tokens on Solana using Raydium. Specify input token, output token, and amount.',
+    description: 'Swap tokens on Solana via Raydium Actions. No SDK, pure blinks.',
     label: 'Swap',
     links: {
       actions: [
@@ -98,21 +98,23 @@ swapRouter.post('/', async (req: Request, res: Response) => {
     const resolvedOutputMint = config.getTokenMint(outputMint as string) || (outputMint as string);
     const slippageBps = slippage ? parseInt(slippage as string, 10) : 50; // Default 0.5%
 
-    console.log(`Building swap: ${amount} ${inputMint} → ${outputMint} for ${account}`);
+    console.log(`Building swap via Raydium Actions: ${amount} ${inputMint} → ${outputMint} for ${account}`);
 
-    // Build the swap transaction using Raydium
-    const transaction = await buildSwapTransaction({
-      owner: account,
+    // Build the swap transaction via Raydium Actions endpoint
+    const result = await buildSwapTransaction({
+      userWallet: account,
       inputMint: resolvedInputMint,
       outputMint: resolvedOutputMint,
       amount: parseFloat(amount as string),
       slippageBps,
     });
 
+    console.log(`Transaction built: ${result.message}`);
+
     const response: ActionPostResponse = {
       type: 'transaction',
-      transaction,
-      message: `Swap ${amount} ${inputMint} for ${outputMint}`,
+      transaction: result.transaction,
+      message: result.message,
     };
 
     res.json(response);

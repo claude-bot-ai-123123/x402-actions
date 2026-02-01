@@ -1,12 +1,11 @@
 import { config } from '../config.js';
 import { 
-  getKoraClient, 
   getKoraFeePayer, 
   signAndSendWithKora,
   estimateFee,
   getKoraSupportedTokens,
 } from '../lib/kora.js';
-import { buildSwapTransaction } from '../lib/raydium.js';
+import { buildSwapTransaction } from '../lib/blinks.js';
 
 // USDC mint on mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -34,13 +33,13 @@ export interface GaslessSwapQuoteResponse {
 }
 
 export interface GaslessSwapResponse {
-  signerPubkey: string;
-  signedTransaction: string;
+  signature: string;
   explorerUrl: string;
 }
 
 /**
  * Get a quote for a gasless swap including the gas fee
+ * Uses Raydium Actions endpoint for the swap
  */
 export async function getGaslessSwapQuote(
   request: GaslessSwapRequest
@@ -51,21 +50,25 @@ export async function getGaslessSwapQuote(
   // Get Kora fee payer
   const feePayer = await getKoraFeePayer();
   
-  // Build swap transaction to estimate gas
-  const swapTx = await buildSwapTransaction({
-    owner: request.userWallet,
-    inputMint: request.inputMint,
-    outputMint: request.outputMint,
+  // Resolve token symbols
+  const inputMint = config.getTokenMint(request.inputMint) || request.inputMint;
+  const outputMint = config.getTokenMint(request.outputMint) || request.outputMint;
+  
+  // Build swap transaction via Raydium Actions to get quote and estimate gas
+  const swapResult = await buildSwapTransaction({
+    userWallet: request.userWallet,
+    inputMint,
+    outputMint,
     amount: parseFloat(request.amount),
     slippageBps,
   });
   
   // Estimate fee in the chosen token
-  const feeEstimate = await estimateFee(swapTx, feeToken);
+  const feeEstimate = await estimateFee(swapResult.transaction, feeToken);
   
   return {
-    inputMint: request.inputMint,
-    outputMint: request.outputMint,
+    inputMint,
+    outputMint,
     inputAmount: request.amount,
     gasFee: {
       token: feeToken,
@@ -89,14 +92,14 @@ export async function executeGaslessSwap(
   const result = await signAndSendWithKora(userSignedTransaction);
   
   return {
-    signerPubkey: result.signerPubkey,
-    signedTransaction: result.signedTransaction,
-    explorerUrl: `https://solscan.io/tx/${result.signerPubkey}`, // Note: This should be tx signature
+    signature: result.signature,
+    explorerUrl: `https://solscan.io/tx/${result.signature}`,
   };
 }
 
 /**
  * Build a gasless swap transaction for user signing
+ * Uses Raydium Actions for routing, Kora for fee payment
  * Returns a transaction that the user needs to sign
  */
 export async function buildGaslessSwapTransaction(
@@ -111,21 +114,25 @@ export async function buildGaslessSwapTransaction(
   // Get Kora fee payer
   const feePayer = await getKoraFeePayer();
   
-  // Build swap transaction with user as owner
-  const swapTx = await buildSwapTransaction({
-    owner: request.userWallet,
-    inputMint: request.inputMint,
-    outputMint: request.outputMint,
+  // Resolve token symbols
+  const inputMint = config.getTokenMint(request.inputMint) || request.inputMint;
+  const outputMint = config.getTokenMint(request.outputMint) || request.outputMint;
+  
+  // Build swap transaction via Raydium Actions
+  const swapResult = await buildSwapTransaction({
+    userWallet: request.userWallet,
+    inputMint,
+    outputMint,
     amount: parseFloat(request.amount),
     slippageBps,
   });
   
   // Estimate fee
-  const feeEstimate = await estimateFee(swapTx, feeToken);
+  const feeEstimate = await estimateFee(swapResult.transaction, feeToken);
   
   const quoteResponse: GaslessSwapQuoteResponse = {
-    inputMint: request.inputMint,
-    outputMint: request.outputMint,
+    inputMint,
+    outputMint,
     inputAmount: request.amount,
     gasFee: {
       token: feeToken,
@@ -137,7 +144,7 @@ export async function buildGaslessSwapTransaction(
   };
   
   return {
-    transaction: swapTx,
+    transaction: swapResult.transaction,
     quote: quoteResponse,
   };
 }
@@ -149,6 +156,7 @@ export async function isGaslessAvailable(): Promise<{
   available: boolean;
   feePayer: string | null;
   supportedTokens: string[];
+  swapBackend: string;
 }> {
   try {
     const [feePayer, supportedTokens] = await Promise.all([
@@ -160,12 +168,14 @@ export async function isGaslessAvailable(): Promise<{
       available: true,
       feePayer,
       supportedTokens,
+      swapBackend: 'Raydium Actions (blinks)',
     };
   } catch (error) {
     return {
       available: false,
       feePayer: null,
       supportedTokens: [],
+      swapBackend: 'Raydium Actions (blinks)',
     };
   }
 }
