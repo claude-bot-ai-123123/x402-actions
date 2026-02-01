@@ -9,11 +9,7 @@ import {
   isGaslessAvailable,
 } from './actions/gasless-swap.js';
 import { config } from './config.js';
-
-// x402 imports
-import { paymentMiddlewareFromConfig, x402ResourceServer } from '@x402/express';
-import { ExactSvmScheme } from '@x402/svm/exact/server';
-import { HTTPFacilitatorClient } from '@x402/core/server';
+import { x402Middleware } from './lib/x402-middleware.js';
 
 const app = express();
 
@@ -24,7 +20,7 @@ app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Payment', 'Payment-Signature'],
-  exposedHeaders: ['X-Payment-Response', 'Payment-Response'],
+  exposedHeaders: ['X-Payment-Response', 'Payment-Response', 'X-Payment-Required', 'Payment-Required'],
 }));
 
 // Add Solana Actions headers to all responses
@@ -39,76 +35,24 @@ app.use(express.json());
 
 // x402 Configuration
 const X402_ENABLED = process.env.X402_ENABLED === 'true';
-const FACILITATOR_URL = process.env.X402_FACILITATOR_URL || 'https://facilitator.x402.org';
 const PAY_TO_ADDRESS = process.env.X402_PAY_TO || process.env.SOLANA_PAY_TO_ADDRESS;
-
-// x402 payment middleware setup
-const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
-const svmScheme = new ExactSvmScheme();
-
-// Solana mainnet network ID (CAIP-2 format)
-const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" as const;
-
-// Payment-protected routes config (only used if X402_ENABLED and PAY_TO configured)
-function buildPaidRoutes(payTo: string) {
-  return {
-    // Pay per swap quote (tiny fee)
-    "POST /actions/swap": {
-      accepts: {
-        scheme: "exact" as const,
-        price: "$0.001", // 0.1 cent per swap
-        network: SOLANA_MAINNET,
-        payTo,
-        maxTimeoutSeconds: 60,
-      },
-      description: "Execute swap transaction via Raydium",
-    },
-    // Gasless endpoints (slightly higher fee to cover gas sponsorship economics)
-    "POST /gasless/quote": {
-      accepts: {
-        scheme: "exact" as const, 
-        price: "$0.005", // 0.5 cent per quote
-        network: SOLANA_MAINNET,
-        payTo,
-        maxTimeoutSeconds: 60,
-      },
-      description: "Get gasless swap quote",
-    },
-    "POST /gasless/build": {
-      accepts: {
-        scheme: "exact" as const,
-        price: "$0.01", // 1 cent per transaction build
-        network: SOLANA_MAINNET,
-        payTo,
-        maxTimeoutSeconds: 60,
-      },
-      description: "Build gasless swap transaction",
-    },
-    "POST /gasless/execute": {
-      accepts: {
-        scheme: "exact" as const,
-        price: "$0.02", // 2 cents per execution (covers gas + margin)
-        network: SOLANA_MAINNET,
-        payTo,
-        maxTimeoutSeconds: 120,
-      },
-      description: "Execute gasless swap via Kora",
-    },
-  };
-}
 
 // Apply x402 middleware if enabled
 if (X402_ENABLED && PAY_TO_ADDRESS) {
   console.log('🔐 x402 payment gating ENABLED');
-  console.log(`   Facilitator: ${FACILITATOR_URL}`);
   console.log(`   Pay to: ${PAY_TO_ADDRESS}`);
+  console.log(`   Kora RPC: ${process.env.KORA_RPC_URL || 'http://localhost:8181'}`);
   
-  const paidRoutes = buildPaidRoutes(PAY_TO_ADDRESS);
-  app.use(paymentMiddlewareFromConfig(
-    paidRoutes,
-    facilitatorClient,
-    [{ network: SOLANA_MAINNET, server: svmScheme }],
-  ));
+  app.use(x402Middleware({
+    payTo: PAY_TO_ADDRESS,
+    routes: {
+      // Pricing in cents (USD)
+      'POST /actions/swap': { usdCents: 0.1, description: 'Execute swap transaction via Raydium' },
+      'POST /gasless/quote': { usdCents: 0.5, description: 'Get gasless swap quote' },
+      'POST /gasless/build': { usdCents: 1, description: 'Build gasless swap transaction' },
+      'POST /gasless/execute': { usdCents: 2, description: 'Execute gasless swap via Kora' },
+    },
+  }));
 } else {
   console.log('⚠️  x402 payment gating DISABLED (set X402_ENABLED=true and X402_PAY_TO to enable)');
 }
@@ -121,8 +65,8 @@ app.get('/', (req, res) => {
     description: 'Actions-compliant API for Solana DeFi with x402 payment gating',
     x402: {
       enabled: X402_ENABLED,
-      facilitator: FACILITATOR_URL,
       payTo: PAY_TO_ADDRESS || 'not configured',
+      koraRpc: process.env.KORA_RPC_URL || 'http://localhost:8181',
     },
     endpoints: {
       free: [
@@ -141,13 +85,10 @@ app.get('/', (req, res) => {
     howToPay: X402_ENABLED ? {
       description: 'No API key needed. Just pay per request.',
       flow: [
-        '1. POST to paid endpoint → receive 402 + payment requirements',
-        '2. Sign USDC payment with your wallet',
-        '3. Retry with Payment-Signature header → receive response',
-      ],
-      clientLibs: [
-        'npm install @x402/fetch - Automatic payment wrapping',
-        'npm install @x402/svm/client - Solana client',
+        '1. POST to paid endpoint → receive 402 + X-Payment-Required header',
+        '2. Build USDC transfer transaction to payTo address',
+        '3. Encode as base64, retry with X-Payment header',
+        '4. Kora verifies + settles → you get the response',
       ],
     } : null,
   });
@@ -195,6 +136,11 @@ app.post('/gasless/quote', async (req, res) => {
       feeToken,
     });
     
+    // Include payment receipt if x402 payment was made
+    if ((req as any).x402Payment) {
+      (quote as any).paymentReceipt = (req as any).x402Payment;
+    }
+    
     res.json(quote);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -220,6 +166,10 @@ app.post('/gasless/build', async (req, res) => {
       feeToken,
     });
     
+    if ((req as any).x402Payment) {
+      (result as any).paymentReceipt = (req as any).x402Payment;
+    }
+    
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -238,6 +188,10 @@ app.post('/gasless/execute', async (req, res) => {
       { inputMint, outputMint, amount, userWallet, slippage, feeToken },
       signedTransaction
     );
+    
+    if ((req as any).x402Payment) {
+      (result as any).paymentReceipt = (req as any).x402Payment;
+    }
     
     res.json(result);
   } catch (error: any) {
