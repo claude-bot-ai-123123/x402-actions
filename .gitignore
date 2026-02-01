@@ -30,3 +30,5 @@ coverage/
 # Kora logs
 kora.log
 *.log
+.env.production
+*.env*
