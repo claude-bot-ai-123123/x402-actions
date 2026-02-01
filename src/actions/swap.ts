@@ -4,7 +4,7 @@ import {
   ActionPostRequest,
   ActionPostResponse,
 } from '@solana/actions';
-import { buildSwapTransaction } from '../lib/raydium.js';
+import { buildJupiterSwapTransaction } from '../lib/jupiter.js';
 import { config } from '../config.js';
 
 export const swapRouter = Router();
@@ -15,7 +15,7 @@ swapRouter.get('/', (req: Request, res: Response) => {
     type: 'action',
     icon: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
     title: 'Swap Tokens',
-    description: 'Swap tokens on Solana using Raydium. Specify input token, output token, and amount.',
+    description: 'Swap tokens on Solana via Jupiter aggregator. Best prices across Raydium, Orca, Meteora, and more.',
     label: 'Swap',
     links: {
       actions: [
@@ -100,19 +100,21 @@ swapRouter.post('/', async (req: Request, res: Response) => {
 
     console.log(`Building swap: ${amount} ${inputMint} → ${outputMint} for ${account}`);
 
-    // Build the swap transaction using Raydium
-    const transaction = await buildSwapTransaction({
-      owner: account,
+    // Build the swap transaction using Jupiter
+    const result = await buildJupiterSwapTransaction({
+      userWallet: account,
       inputMint: resolvedInputMint,
       outputMint: resolvedOutputMint,
       amount: parseFloat(amount as string),
       slippageBps,
     });
 
+    console.log(`Route: ${result.route} | Output: ${result.outputAmount} | Impact: ${result.priceImpact}%`);
+
     const response: ActionPostResponse = {
       type: 'transaction',
-      transaction,
-      message: `Swap ${amount} ${inputMint} for ${outputMint}`,
+      transaction: result.transaction,
+      message: `Swap ${result.inputAmount} ${inputMint} → ${result.outputAmount} ${outputMint} via ${result.route}`,
     };
 
     res.json(response);
