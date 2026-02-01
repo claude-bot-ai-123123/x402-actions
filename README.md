@@ -4,8 +4,6 @@ Actions-compliant API for Solana DeFi transactions with gasless support via [Kor
 
 Build swap, stake, and lend transactions via a simple HTTP interface. Users can pay gas fees in USDC instead of SOL.
 
-**Swap Backend:** Jupiter aggregator — routes through Raydium, Orca, Meteora, and more for best prices.
-
 ## Features
 
 - **Actions-compliant** - Works with Solana Blinks and Actions standard
@@ -40,9 +38,6 @@ PORT=3000
 
 # Solana RPC URL (use a reliable RPC for production)
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-
-# Jupiter API key (get free tier at portal.jup.ag)
-JUPITER_API_KEY=your_jupiter_api_key_here
 
 # Kora fee payer private key (base58 encoded)
 # This wallet pays gas fees and gets reimbursed in USDC

@@ -1,11 +1,12 @@
 import { config } from '../config.js';
 import { 
+  getKoraClient, 
   getKoraFeePayer, 
   signAndSendWithKora,
   estimateFee,
   getKoraSupportedTokens,
 } from '../lib/kora.js';
-import { buildJupiterSwapTransaction, getJupiterQuote } from '../lib/jupiter.js';
+import { buildSwapTransaction } from '../lib/raydium.js';
 
 // USDC mint on mainnet
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -23,9 +24,6 @@ export interface GaslessSwapQuoteResponse {
   inputMint: string;
   outputMint: string;
   inputAmount: string;
-  outputAmount: string;
-  priceImpact: string;
-  route: string;
   gasFee: {
     token: string;
     amount: string;
@@ -36,13 +34,13 @@ export interface GaslessSwapQuoteResponse {
 }
 
 export interface GaslessSwapResponse {
-  signature: string;
+  signerPubkey: string;
+  signedTransaction: string;
   explorerUrl: string;
 }
 
 /**
  * Get a quote for a gasless swap including the gas fee
- * Uses Jupiter for best price across all DEXs
  */
 export async function getGaslessSwapQuote(
   request: GaslessSwapRequest
@@ -53,9 +51,9 @@ export async function getGaslessSwapQuote(
   // Get Kora fee payer
   const feePayer = await getKoraFeePayer();
   
-  // Build swap transaction via Jupiter to get quote and estimate gas
-  const jupiterResult = await buildJupiterSwapTransaction({
-    userWallet: request.userWallet,
+  // Build swap transaction to estimate gas
+  const swapTx = await buildSwapTransaction({
+    owner: request.userWallet,
     inputMint: request.inputMint,
     outputMint: request.outputMint,
     amount: parseFloat(request.amount),
@@ -63,15 +61,12 @@ export async function getGaslessSwapQuote(
   });
   
   // Estimate fee in the chosen token
-  const feeEstimate = await estimateFee(jupiterResult.transaction, feeToken);
+  const feeEstimate = await estimateFee(swapTx, feeToken);
   
   return {
     inputMint: request.inputMint,
     outputMint: request.outputMint,
-    inputAmount: jupiterResult.inputAmount,
-    outputAmount: jupiterResult.outputAmount,
-    priceImpact: jupiterResult.priceImpact,
-    route: jupiterResult.route,
+    inputAmount: request.amount,
     gasFee: {
       token: feeToken,
       amount: feeEstimate.feeInToken,
@@ -94,14 +89,14 @@ export async function executeGaslessSwap(
   const result = await signAndSendWithKora(userSignedTransaction);
   
   return {
-    signature: result.signature,
-    explorerUrl: `https://solscan.io/tx/${result.signature}`,
+    signerPubkey: result.signerPubkey,
+    signedTransaction: result.signedTransaction,
+    explorerUrl: `https://solscan.io/tx/${result.signerPubkey}`, // Note: This should be tx signature
   };
 }
 
 /**
  * Build a gasless swap transaction for user signing
- * Uses Jupiter for routing, Kora for fee payment
  * Returns a transaction that the user needs to sign
  */
 export async function buildGaslessSwapTransaction(
@@ -116,9 +111,9 @@ export async function buildGaslessSwapTransaction(
   // Get Kora fee payer
   const feePayer = await getKoraFeePayer();
   
-  // Build swap transaction via Jupiter
-  const jupiterResult = await buildJupiterSwapTransaction({
-    userWallet: request.userWallet,
+  // Build swap transaction with user as owner
+  const swapTx = await buildSwapTransaction({
+    owner: request.userWallet,
     inputMint: request.inputMint,
     outputMint: request.outputMint,
     amount: parseFloat(request.amount),
@@ -126,15 +121,12 @@ export async function buildGaslessSwapTransaction(
   });
   
   // Estimate fee
-  const feeEstimate = await estimateFee(jupiterResult.transaction, feeToken);
+  const feeEstimate = await estimateFee(swapTx, feeToken);
   
   const quoteResponse: GaslessSwapQuoteResponse = {
     inputMint: request.inputMint,
     outputMint: request.outputMint,
-    inputAmount: jupiterResult.inputAmount,
-    outputAmount: jupiterResult.outputAmount,
-    priceImpact: jupiterResult.priceImpact,
-    route: jupiterResult.route,
+    inputAmount: request.amount,
     gasFee: {
       token: feeToken,
       amount: feeEstimate.feeInToken,
@@ -145,7 +137,7 @@ export async function buildGaslessSwapTransaction(
   };
   
   return {
-    transaction: jupiterResult.transaction,
+    transaction: swapTx,
     quote: quoteResponse,
   };
 }
@@ -157,7 +149,6 @@ export async function isGaslessAvailable(): Promise<{
   available: boolean;
   feePayer: string | null;
   supportedTokens: string[];
-  swapBackend: string;
 }> {
   try {
     const [feePayer, supportedTokens] = await Promise.all([
@@ -169,14 +160,12 @@ export async function isGaslessAvailable(): Promise<{
       available: true,
       feePayer,
       supportedTokens,
-      swapBackend: 'Jupiter (aggregates Raydium, Orca, Meteora, etc.)',
     };
   } catch (error) {
     return {
       available: false,
       feePayer: null,
       supportedTokens: [],
-      swapBackend: 'Jupiter',
     };
   }
 }

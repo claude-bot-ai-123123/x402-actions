@@ -72,14 +72,13 @@ export async function signWithKora(transaction: string): Promise<{
  * The transaction should already be signed by the user
  */
 export async function signAndSendWithKora(transaction: string): Promise<{
-  signature: string;
   signerPubkey: string;
+  signedTransaction: string;
 }> {
   const kora = getKoraClient();
   const result = await kora.signAndSendTransaction({ transaction });
-  // Kora returns signed_transaction which is the signature after send
   return {
-    signature: result.signed_transaction,
     signerPubkey: result.signer_pubkey,
+    signedTransaction: result.signed_transaction,
   };
 }
